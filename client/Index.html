@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cards</title>
+    <link rel="stylesheet" href="Assets/css/style.css">
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="./Assets/js/engine.js"></script>
+    <script src="http://localhost:3000/socket.io/socket.io.js"></script>
+
+</head>
+<body>
+    <section class="sec_inicio">
+
+        <h1>Pumba!</h1>
+
+        <div class="flex-column">
+            <p class="p1">Indica tu nombre</p>
+            <input type="text" id="nick" class="datos" name="nick" placeholder="Nick" >
+            <button id="createGame">Crear partida</button>
+            <p class="p1">Código de sala</p>
+            <input type="number" id="gameId" class="datos" name="gameId" placeholder="Game Code">
+            <button id="joinGame">Unirse</button>
+        </div>
+        <div>    
+        </div>
+        
+    </section>
+</body>
+</html>

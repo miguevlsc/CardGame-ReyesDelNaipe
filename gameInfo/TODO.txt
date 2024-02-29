@@ -1,0 +1,33 @@
+
+
+        -- TODO --
+
+
+        IMPORTANT:
+        Refactorizar las clases a la hora de robar cartas y siguiente turno para que se pase como parámetro el número de cartas de cada jugador y asi no calcularlo en cada cliente y que pueda haber fallos
+
+app.js:
+
+    initGame: comprobar si se intenta inicar la partida con más de un usuario
+
+    useCard: A la hora de usar un as o un dos hay que tener en cuenta que se pueden acumular las cartas que se tienen que robar.
+
+    cambiarTurno(gameId, cardNum); // Pasar como parametro robarCarta : bool para saber si saltar o no a un jugador
+    shuffledDeck: Crear la baraja en una función para que se cree una diferente en cada partida y no se use siempre la misma
+
+
+engine.js:
+
+    guardar las cartas robadas en img vacíos (si hay) en vez de crear otro img
+
+
+
+    Implementar la funcionalidad d refrescar la página y mantener la sesión:
+        dar por parametros url el userId y el gameId
+        en app.js escuchar la llamada de la query con esos parametros. Si existe la partida y el usuario* dirigirle a gameInitiated mandando por parámetros las cartas de cada jugador y el resto de información
+            *Si un usuario se desconecta tendrá que cambiar su socket.id en gamse[gameId].sockets por null o ''. Cuando el usuario se vuelva a conectar comprobar si hay un hueco vacío. si es así introducir el nuevo socket.id en esa posición
+
+
+
+Cuando robas tienes que poder hechar una carta (si se puede)
+Cuando tiras un 1 o un 2 hay ocasiones en las que no te lo quita de la baraja
