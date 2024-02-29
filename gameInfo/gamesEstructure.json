@@ -1,26 +1,5 @@
 {
-    "123":{
-        "users": ["usu1", "usu2","usu3"],
-        "host": "usu1",
-        "init": "false"
-        
-    },
-    "456":["usu4", "usu5","usu6"],
-    "789":["usu7", "usu8","usu9"],
-
     "1234":{
-        "1438": {
-            "maxUsers": 4,
-            "users": [ "asd", "qwe" ],
-            "host": "asd",
-            "sockets": [ "wlBWpApAjGZAyM0aAAAH", "cVJay1qdU1EHzQTIAAAJ" ],
-            "init": true,
-            "turn": "qwe",
-            "cards": { "asd": "[Array]", "qwe": "[Array]" }
-          }
-    },
-
-    "8912":{
         "maxUsers":4,
         "users":["asd","qwe"],
         "host":"asd",

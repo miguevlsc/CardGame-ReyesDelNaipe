@@ -1,263 +1,210 @@
-/* const {
-  createGame,
-  joinGame,
-  intitGame,
-  
-  shuffleCards,
-  useCard,
-  comprobarGanar,
-
-  carta1and2,
-  cartaSota,
-
-  robarCarta,
-  addCartasRobar,
-  resetCartasRobar,
-  getCartaPaloNum,
-  getNextTurn,
-  setNextTurn,
-
-  cambiarTurno,
-  cambiarTurnoSalto,
-  saltarTurno,
-
-  sendMsg,
-  sendRoomMsg,
-} = require("./model.js"); */
-
+// Importa el módulo 'express' para crear una aplicación web.
 const express = require('express');
 
-//const { readFileSync } = require("fs");
-//const {createServer} = require('http');
-const folderPath = '/client';
+// Importa el módulo 'http' para crear un servidor HTTP.const http = require('http');
 const http = require('http');
-const createServer = http.createServer((req,res) => {
-  const filePath = path.join(folderPath, req.url);
-  const fileStream = fs.createReadStream(filePath);
-})
-const { Server } = require('socket.io');
 
-const util = require('util')
-
+// Crea una instancia de la aplicación web utilizando 'express'.
 const app = express();
-/* const server = createServer({
-  key: readFileSync("C:/Users/migue/Documents/SSL/rootSSL.key"),
-  cert: readFileSync("C:/Users/migue/Documents/SSL/rootSSL.pem")
-},app); */
+
+// Crea un servidor HTTP utilizando la instancia de la aplicación.
 const server = http.createServer(app);
 
-//const { send } = require('process');
+// Importa el módulo 'socket.io' para la comunicación en tiempo real.
+const { Server } = require('socket.io');
 
+// Crea una instancia de 'Server' para manejar las conexiones y eventos en tiempo real.
 const io = new Server(server);
 
 // Objeto para guardar la información de las partidas y sus jugadores
-let games = {};
+const games = require('./data/games.json');
 
-// ---- Permitir que express utilize archivos estáticos como motor.js y estilos.css ----
+// Permitir que express utilize archivos estáticos como engine.js y estilos.css
 app.use(express.static("client"));
 
+// Inicializar servidor en el PUERTO 3000
+const PUERTO = 3000
+server.listen(3000, () => {
+  console.log(`Servidor corriendo en el puerto ${PUERTO}`)
+})
+
+// Evento nativo de conexión con cliente
+io.on('connection', (socket) => {
+
+  try {
+    console.log("Un usuario se ha conectdo " + socket.id);
+
+    socket.on('createGame', (nick) => {
+
+      if (validateNick(nick)) {
+        console.log('Crear partida node.js: ' + nick);
+        createGame(socket, nick);
+      }
+      else{console.log('Usuario inválido: ' + nick);}
+    });
+
+    socket.on('joinGame', (gameId, nick) => {
+      if (validateNick(nick)) {
+        console.log(`El usuario "${nick}" quiere unirse a la partida ${gameId}`);
+        joinGame(socket, gameId, nick);
+      }
+      else {
+        console.log('Nick no válido ');
+        sendMsg(socket,'Nick inválido');
+      }
+    });
+
+    socket.on('getGameData', (gameId, nick) => {
+      let isHost = false;
+      if (games[gameId].host === nick){
+        isHost = true;
+      }else{isHost = false}
+      socket.emit('getGameData', games[gameId], isHost);
+    });
+    
+    socket.on('initGame', (gameId, nick) => {
+      initGame(socket, gameId, nick);
+      console.log('GamesData: ' + JSON.stringify(games));
+    });
+
+
+    socket.on('useCard', (gameId, userId, cardNum) => {
+      useCard(socket, gameId, userId, cardNum);
+    });
+
+    socket.on('robarCarta', (userId, gameId, numCards) => {
+      if(games[gameId].turn == userId){
+        robarCarta(gameId, userId, numCards);
+        let carta = games[gameId].lastCard;
+        cambiarTurno(gameId,carta, 1);
+      }
+      else{
+        sendMsg(socket, 'No es tu turno, no puedes robar.')
+      }
+    });
+
+  } catch (e) {
+    console.error(e.stack);
+    console.error(e.name);
+    console.error(e.message);
+  }
+  
+})
+
+// Crear una partida
+function createGame(socket, nick) {
+
+  let gameId = Math.floor(Math.random() * 9000) + 1000;
+  
+  if (!games[gameId]) {
+
+    // Añadir la información inicial del juego al objeto games{}
+    games[gameId] = {
+      maxUsers: 4,
+      users: [nick],
+      host: nick,
+      sockets: [socket.id],
+      init: false,
+      cardsRobar : 0
+    }
+
+    // Unir al host a la sala
+    gameId = gameId.toString().trim();
+    socket.join(gameId);
+
+    // Evento para informar al usuario de la creación correcta de la partida
+    socket.emit('joined', gameId, nick);
+    
+    // Informar a toda la sala de la unión de un jugador (ayuda al usuario a imprimir la información del juego)
+    io.to(gameId).emit('userConnected', games[gameId].users, gameId);
+  }
+}
+
+// Unirse a una partida
+function joinGame (socket, gameId, nick) {
+
+  // Verificar el nick y el estado de la partida
+  if (!games[gameId]) {
+    sendMsg(socket, `No se encontró una partida con el código ${gameId}`)
+  } else if (games[gameId].users.indexOf(nick) !== -1) {
+    sendMsg(socket, `Ya hay un usuario con el nick ${nick}, pruebe con otro`);
+  } else if (games[gameId].users.length >= 4) {
+    sendMsg(socket, `La partida está llena`);
+  } else {
+
+    // Añadir usuario a la partida
+    games[gameId].users.push(nick);
+    games[gameId].sockets.push(socket.id);
+
+    // Añadir el usuario a la sala
+    gameId = gameId.toString().trim();
+    socket.join(gameId);
+
+    // Evento para informar al usuario para unirse a la partida
+    socket.emit('joined', gameId, nick);
+    
+    // Informar a toda la sala de la unión de un jugador
+    io.to(gameId).emit('userConnected', games[gameId].users, gameId);
+  }
+}
+
+// Iniciar la partida
+function initGame(socket, gameId, nick){
+
+  if(nick != games[gameId].host){sendMsg(socket, `Solo el host de la sala puede iniciar la partida`);}
+  else if(games[gameId].init == true) {sendMsg(socket, `La partida ya ha sido iniciada`);}
+  else if(games[gameId].users <= 1) {sendMsg(socket, `Se necesita un mínimo de 2 jugadores para comenzar la partida`);}
+  else{
+
+    // Cambiar el estado de la partida a INICIADA
+    games[gameId].init = true;
+
+    // Generar una baraja y repartir cartas
+    let cards = shuffleCards(games[gameId]);
+    
+    // Guardar la baraja mezclada en la información de la partida
+    games[gameId]['cards'] = cards;
+
+    // Inicar la primera carta de la baraja como la carta de apertura
+    let shuffledDeck = games[gameId].shuffledDeck;
+    let firstCard = shuffledDeck[shuffledDeck.length-1];
+    shuffledDeck.shift();
+
+    // Crear objeto cardsNum en la partida
+    games[gameId]['cardsNum'];
+
+    // Guardar el numero de cartas de cada jugador
+    for (let i = 0; i < cards.length; i++) {
+      games[gameId].cardNum[cards[i]] = cards[i].length;
+    }
+
+    // Guardar la carta de apertura como la última usada
+    games[gameId]['lastCard'] = firstCard;
+
+    // Crear objeto para mandarlo a todos los jugadores de la partida
+    let data = {
+      'users': games[gameId].users,
+      'turn' : games[gameId].turn
+    };
+
+    // Informar a toda la sala que el juego ha sido iniciado
+    for (let i = 0; i < games[gameId].sockets.length; i++) {
+      io.to(games[gameId].sockets[i]).emit('gameInitiated', gameId, JSON.stringify(games[gameId].users[i]), JSON.stringify(data), JSON.stringify(cards[games[gameId].users[i]]), firstCard);      
+    }     
+  }
+  
+}
 
 // Comprobar si el Usuario tiene un nombre (nick) válido
 function validateNick(nick) {
   return String(nick).length != '' & String(nick).length != null
 }
 
-
-io.on('connection', (socket) => {
-
-  try {
-    console.log("Un usuario se ha conectdo " + socket.id);
-
-
-
-  socket.on('createGame', (nick) => {
-
-    if (validateNick(nick)) {
-      console.log('Crear partida node.js: ' + nick);
-      createGame(socket, nick);
-    }
-    else{console.log('Usuario inválido: ' + nick);}
-  });
-
-  socket.on('joinGame', (gameId, nick) => {
-    if (validateNick(nick)) {
-      console.log(`El usuario "${nick}" quiere unirse a la partida ${gameId}`);
-      joinGame(socket, gameId, nick);
-    }
-    else {
-      console.log('Nick no válido ');
-      sendMsg(socket,'Nick inválido');
-      //socket.emit('InvalidNick', );
-    }
-  });
-
-  socket.on('getGameData', (gameId, nick) => {
-    let isHost = false;
-    if (games[gameId].host === nick){
-      isHost = true;
-    }else{isHost = false}
-    socket.emit('getGameData', games[gameId], isHost);
-  });
-  
-  socket.on('initGame', (gameId, nick) => {
-    initGame(socket, gameId, nick);
-    /* console.log(`Ha comenzado la partida con id: ${gameId}`);
-    if(nick != games[gameId].host){sendMsg(socket, `Solo el host de la sala puede iniciar la partida`); console.log('Solo el host de la sala puede iniciar la partida');}
-    else if(games[gameId].init === true) {sendMsg(socket, `La partida ya ha sido iniciada`);}
-    else{
-      //initGame(socket, gameId, nick);
-      console.log(`Partida ${gameId} iniciada con éxito`);
-      games[gameId].init = true;
-      //this is an ES6 Set of all client ids in the room
-      console.log(io.sockets.adapter.rooms.get(gameId));
-      console.log(io.sockets.adapter.rooms);
-      console.log(socket.rooms);
-      //socket.to(gameId).emit('gameInitiated', gameId, games[gameId].users);
-      let users = games[gameId].users;
-      let cards = shuffleCards(games[gameId]);
-      console.log('final cards: ' + JSON.stringify(cards));
-      console.log('game: ' + JSON.stringify(games));
-      let data = {
-        'users':users,
-        'turn' : ''
-      };
-      let shuffledDeck = games[gameId].shuffledDeck;
-      console.log('shuffledDeckkk: ' + shuffledDeck);
-      let firstCard = shuffledDeck[shuffledDeck.length-1];
-      shuffledDeck.shift();
-      console.log('shift: ' + shuffledDeck)
-
-      games[gameId]['cards'] = cards;
-
-      let cardsNum = [];
-      games[gameId]['cardsNum'];
-      for (let i = 0; i < cards.length; i++) {
-        games[gameId].cardNum[cards[i]] = cards[i].length;
-        
-      }
-      console.log('cards: ' + util.inspect(games));
-
-      games[gameId]['lastCard'] = firstCard;
-      console.log('firsCard: ' + JSON.stringify(games[gameId]));
-
-      
-
-      for (let i = 0; i < games[gameId].sockets.length; i++) {
-        io.to(games[gameId].sockets[i]).emit('msg', 'proud');
-        console.log('indexOf: ' + games[gameId].sockets.indexOf(games[gameId].sockets[i]))
-        console.log('turn: ' + games[gameId].turn);
-        
-        data.turn = games[gameId].turn;
-
-        console.log(data.turn);
-
-        io.to(games[gameId].sockets[i]).emit('gameInitiated', gameId, JSON.stringify(games[gameId].users[i]), JSON.stringify(data), JSON.stringify(cards[games[gameId].users[i]]), firstCard);
-                
-      }
-      //io.to(games[gameId].sockets[0]).emit('msg', 'sockrrret.id');
-      //io.to(games[gameId].sockets[1]).emit('msg', 'sockrrret.id');
-      //socket.broadcast.to(gameId).emit('gameInitiated', gameId, JSON.stringify(data));
-      //io.in(gameId).emit('gameInitiated', gameId, JSON.stringify(data));
-    } */
-  });
-
-
-  socket.on('useCard', (gameId, userId, cardNum) => {
-    useCard(socket, gameId, userId, cardNum);
-  });
-
-  socket.on('robarCarta', (userId, gameId, numCards) => {
-    if(games[gameId].turn == userId){
-      robarCarta(socket, gameId, userId, numCards);
-      let carta = games[gameId].lastCard;
-      cambiarTurno(gameId,carta);
-    }
-    else{
-      sendMsg(socket, 'No es tu turno, no puedes robar.')
-    }
-  });
-
-  } catch (e) {
-    error.log(e.stack);
-    error.log(e.name);
-    error.log(e.message);
-  }
-  
-  
-
-})
-
-
-// TODO Crear la baraja en una función para que se cree una diferente en cada partida y no se use siempre la misma
-
-function initGame(socket, gameId, nick){
-  console.log(`Ha comenzado la partida con id: ${gameId}`);
-  if(nick != games[gameId].host){sendMsg(socket, `Solo el host de la sala puede iniciar la partida`); console.log('Solo el host de la sala puede iniciar la partida');}
-  else if(games[gameId].init == true) {sendMsg(socket, `La partida ya ha sido iniciada`);}
-  else if(games[gameId].users <= 1) {sendMsg(socket, `Se necesita un mínimo de 2 jugadores para comenzar la partida`);}
-  else{
-    //initGame(socket, gameId, nick);
-    console.log(`Partida ${gameId} iniciada con éxito`);
-    games[gameId].init = true;
-    //this is an ES6 Set of all client ids in the room
-    console.log(io.sockets.adapter.rooms.get(gameId));
-    console.log(io.sockets.adapter.rooms);
-    console.log(socket.rooms);
-    //socket.to(gameId).emit('gameInitiated', gameId, games[gameId].users);
-    let users = games[gameId].users;
-    let cards = shuffleCards(games[gameId]);
-    console.log('final cards: ' + JSON.stringify(cards));
-    console.log('game: ' + JSON.stringify(games));
-    let data = {
-      'users':users,
-      'turn' : ''
-    };
-    /*  for(sock in games[gameId].sockets){
-      io.to(sock).emit('msg', 'proud');
-    } */
-    let shuffledDeck = games[gameId].shuffledDeck;
-    console.log('shuffledDeckkk: ' + shuffledDeck);
-    let firstCard = shuffledDeck[shuffledDeck.length-1];
-    shuffledDeck.shift();
-    console.log('shift: ' + shuffledDeck)
-
-    games[gameId]['cards'] = cards;
-
-    let cardsNum = [];
-    games[gameId]['cardsNum'];
-    for (let i = 0; i < cards.length; i++) {
-      games[gameId].cardNum[cards[i]] = cards[i].length;
-      
-    }
-    console.log('cards: ' + util.inspect(games));
-
-    games[gameId]['lastCard'] = firstCard;
-    console.log('firsCard: ' + JSON.stringify(games[gameId]));
-
-    
-
-    for (let i = 0; i < games[gameId].sockets.length; i++) {
-      io.to(games[gameId].sockets[i]).emit('msg', 'proud');
-      console.log('indexOf: ' + games[gameId].sockets.indexOf(games[gameId].sockets[i]))
-      console.log('turn: ' + games[gameId].turn);
-      
-      data.turn = games[gameId].turn;
-      /* if(games[gameId].users[i] == games[gameId].turn) {
-      }else{ data.turn = false;} */
-      console.log(data.turn);
-
-      io.to(games[gameId].sockets[i]).emit('gameInitiated', gameId, JSON.stringify(games[gameId].users[i]), JSON.stringify(data), JSON.stringify(cards[games[gameId].users[i]]), firstCard);
-              
-    }
-    //io.to(games[gameId].sockets[0]).emit('msg', 'sockrrret.id');
-    //io.to(games[gameId].sockets[1]).emit('msg', 'sockrrret.id');
-    //socket.broadcast.to(gameId).emit('gameInitiated', gameId, JSON.stringify(data));
-    //io.in(gameId).emit('gameInitiated', gameId, JSON.stringify(data));
-  }
-}
-
+// Barajar cartas
 function shuffleCards(game){
-  let deckCards = [
+
+  // Crear baraja ordenada
+  let deck = [
     'oro-1', 'bastos-1', 'copas-1', 'espadas-1',
     'oro-2', 'bastos-2', 'copas-2', 'espadas-2',
     'oro-3', 'bastos-3', 'copas-3', 'espadas-3',
@@ -269,53 +216,59 @@ function shuffleCards(game){
     'oro-11', 'bastos-11', 'copas-11', 'espadas-11',
     'oro-12', 'bastos-12', 'copas-12', 'espadas-12'
   ];
-  let deck = deckCards;
-  let data = {};
-  console.log(deck);
-  let users = game.users;
+  
+  // Mezclar la baraja y guardarla en la partida
   game['shuffledDeck'] = deck.sort(()=> Math.random() - 0.5);
+  
   let shuffledDeck = game.shuffledDeck;
-  //shuffledDeck = deck.sort(()=> Math.random() - 0.5);
-  console.log(shuffledDeck, users);
-
+  
   game['cardsNum'] = {};
   let cardsNum = game.cardsNum;
-
+  
+  // Asignar cartas de la baraja a cada jugador
+  let data = {};
+  let users = game.users;
   for (let i = 0; i < users.length; i++) {
     let user = users[i];
-    let userCards = []; 
-    userCards.push(shuffledDeck[0],shuffledDeck[1],shuffledDeck[2],shuffledDeck[3],shuffledDeck[4]);
-    shuffledDeck.splice(0, 5);
-    console.log('shuffledDeck: '+shuffledDeck);
+    let userCards = [];
+
+    // Asignar cartas al usuario y quitarlas de la baraja guardada
+    userCards = shuffledDeck.splice(0, 5);
+
     data[user] = userCards;
-    console.log('data: ' + JSON.stringify(data));
     cardsNum[user] = userCards.length;
     
   }
-/*   games[game['turn'] = game.users.length -1]
-  console.log(games[game]); */
-  game['turn'] = game.users[1]
-  console.log('turnA: ' + game.users.length)
-  console.log('turn: ' + game.turn)
-  return data;
 
+  // Se inica el turno del jugador (el siguiente al creador de la partida)
+  game['turn'] = game.users[1]
+
+  return data;
 }
 
+// Devolver la carta separando el palo y el número
 function getCartaPaloNum(cardNum){
   const regex = /(\D+)-(\d+)/;
   const cartaPaloNum = cardNum.match(regex);
   return cartaPaloNum;
 }
 
+// Usar una carta
 function useCard(socket, gameId, userId, cardNum) {
-  
-  if(games[gameId].turn != userId){
-    sendMsg(socket, 'No es tu turno');
-  }
+
+  // Comprobar turno del jugador
+  let cards = games[gameId].cards[userId];
+  const userCards = Object.values(cards);
+  const cardExists = userCards.some(cards => cards.includes(cardNum));
+
+  if(games[gameId].turn != userId){sendMsg(socket, 'No es tu turno');}
+  else if(!cardExists){sendMsg(socket, 'Carta inválida')}
   else{
-    const cartaNueva = getCartaPaloNum(cardNum);
     
     let lastCard = games[gameId].lastCard;
+    
+    // Generar una lista que almacena el palo y el número
+    const cartaNueva = getCartaPaloNum(cardNum);
     let cartaUltima = getCartaPaloNum(lastCard);
 
     if (cartaNueva && cartaUltima) {
@@ -323,355 +276,230 @@ function useCard(socket, gameId, userId, cardNum) {
       const numeroNuevo = parseInt(cartaNueva[2]);
       const paloUltimo = cartaUltima[1];
       const numeroUltimo = parseInt(cartaUltima[2]);
-      console.log('Palabra:', paloNuevo); // Output: Palabra: copas
-      console.log('Número:', numeroNuevo); // Output: Número: 11
 
+      // La carta es un 10
       if(numeroNuevo == 10){
         cartaSota(socket, gameId, userId, cardNum);
       }
+      // Comprobar si coinciden las cartas en palo o número
       else if(paloNuevo == paloUltimo || numeroNuevo == numeroUltimo) {
-      //if(1==1) {
-        console.log('Carta válida');
+        
+        games[gameId].lastCard = cardNum;
+
+        // La carta es 1 o 2
         if(numeroNuevo == 1 || numeroNuevo == 2) {
-          
+
+          // Comprobar si el siguiente jugador tiene una carta igual
           let result = carta1and2(socket, gameId, numeroNuevo); 
-          games[gameId].lastCard = cardNum;
+          
+          // Quitamos la carta usada de la mano del jugador
           const cards = games[gameId].cards[userId];
-          cardIndex = cards.indexOf(cardNum);
-          if(cardIndex)cards.splice(cardIndex, 1);
-          console.log('Carta quitada: ' + JSON.stringify(games[gameId].cards))
+          let cardIndex = cards.indexOf(cardNum);
+          if(cardIndex){cards.splice(cardIndex, 1)};
+          
           comprobarGanar(gameId, userId);
 
+          // Saltar o no al siguiente jugador
           if(result){
-            cambiarTurnoSalto(gameId, cardNum);
+            cambiarTurno(gameId, cardNum, 2);
           }else{
-            cambiarTurno(gameId, cardNum);
+            cambiarTurno(gameId, cardNum, 1);
           }
+
+
         }
+        // La carta es un 11 
         else if(numeroNuevo == 11){
-          //saltarTurno(gameId);
-          games[gameId].lastCard = cardNum;
+
+          // Quitamos la carta usada de la mano del jugador
           const cards = games[gameId].cards[userId];
-          cardIndex = cards.indexOf(cardNum);
-          if(cardIndex)cards.splice(cardIndex, 1);
-          console.log('Carta quitada: ' + JSON.stringify(games[gameId].cards))
+          let cardIndex = cards.indexOf(cardNum);
+          if(cardIndex){cards.splice(cardIndex, 1)};
           
           comprobarGanar(gameId, userId);
-          cambiarTurnoSalto(gameId, cardNum);
+
+          // Saltar al siguiente jugador
+          cambiarTurno(gameId, cardNum, 2);
+          
         }
+        // La carta es cualquier otro número
         else{
-          games[gameId].lastCard = cardNum;
+          // Quitamos la carta usada de la mano del jugador
           const cards = games[gameId].cards[userId];
           cardIndex = cards.indexOf(cardNum);
-          if(cardIndex)cards.splice(cardIndex, 1);
-          console.log('Carta quitada: ' + JSON.stringify(games[gameId].cards))
+          if(cardIndex){cards.splice(cardIndex, 1)};
           
           comprobarGanar(gameId, userId);
-          cambiarTurno(gameId, cardNum);
+          cambiarTurno(gameId, cardNum, 1);
         }
       }
+      else{sendMsg(socket, 'No puedes usar esa carta')}
       
     } else {
       console.log('El formato no es válido');
     }
   }
-  console.log('game: ' + JSON.stringify(games));
 }
 
+// Gestionar carta 1 y 2
 function carta1and2(socket, gameId, numeroNuevo){
-          
+   
   let nextUser = getNextTurn(gameId);
-  console.log('nextUser: ' + nextUser);
+
   // Comprobamos si el siguiente usuario tiene una carta del mismo numero
   let robar;
-  for(let i in games[gameId].cards[nextUser]){
-    let cards = games[gameId].cards[nextUser];
-    console.log('cards: ' + games[gameId].cards[nextUser]);
-    console.log('card: ' + i)
+  let cards = games[gameId].cards[nextUser];
+  for(let i in cards){
+
     carta = getCartaPaloNum(cards[i]);
-    let paloCarta = carta[1];
     let numCarta = parseInt(carta[2]);
 
-    console.log('paloCarta:', paloCarta); // Output: Palabra: copas
-    console.log('numCarta:', numCarta); // Output: Número: 11
     
-    if(numCarta == numeroNuevo){
+    if(numCarta === numeroNuevo){
       robar = false;
-      console.log('No tiene que robar');
+      break;
     }
     else{
-      if(robar != false){
+      if(robar !== false){
         robar = true;
-        console.log('roba tigre.' + numCarta);
       }
       }
   }
 
+  // Hacer robar carta/s al siguiente jugador
   if(robar){
+
     addCartasRobar(gameId, numeroNuevo);
     let userNext = getNextTurn(gameId);
+    let sockets = games[gameId].sockets;
+    let socketUser = sockets.at(userNext);
+
     let robarNum = games[gameId].cardsRobar;
-    sendMsg(socket, 'El siguiente tiene que robar: ' + robarNum + ' cartas');
-    robarCarta(socket, gameId, userNext, robarNum);
+    sendMsg(socketUser, 'Tienes que robar: ' + robarNum + ' carta/s');
+
+    robarCarta(gameId, userNext, robarNum);
     resetCartasRobar(gameId);
-    //cambiarTurnoSalto(gameId, cardNum);
+
     return true;
-    //saltarTurno(gameId);
+
   }else{
+
     // Acumular las cartas que hay que robar
     addCartasRobar(gameId, numeroNuevo);
+    
     return false;
+
   }
 }
 
+// Gestionar carta 10 / sota
 function cartaSota(socket, gameId, userId, cardNum){
-  console.log('sota recivida');
+
+  //Se informa al usuario de que debe elegir un palo nuevo
   socket.emit('elegirPalo');
   
+  // Recibir la respuesta del usuario
   socket.on('paloElegido', (palo) => {
-    console.log('palo: ' + palo)
     
+    // Quitamos la carta usada de la mano del jugador
     const cards = games[gameId].cards[userId];
-    cardIndex = cards.indexOf(cardNum);
-    if(cardIndex)cards.splice(cardIndex, 1);
-    console.log('Carta quitada: ' + JSON.stringify(games[gameId].cards))
+    let cardIndex = cards.indexOf(cardNum);
+    if(cardIndex){cards.splice(cardIndex, 1)};
+
+    // Cambiar la última carta al palo elegido
     let cartaNum = palo + '-10';
-    console.log('cardNum: ' + cartaNum);
     games[gameId].lastCard = cartaNum;
     
     comprobarGanar(gameId, userId);
-    cambiarTurno(gameId, cardNum); // Pasar como parametro robarCarta : bool para saber si saltar o no a un jugador
+    cambiarTurno(gameId, cardNum, 1);
+
     sendRoomMsg(gameId, `Se ha cambiado el palo a ${palo}`)
 
   })
 }
 
-function robarCarta(socket, gameId, userId, numCards){
+// Hacer robar cartas al usuario
+function robarCarta(gameId, userId, numCards){
   let carta;
   let shuffledDeck = games[gameId].shuffledDeck;
   let cartas = [];
 
+  // Robar tantas cartas como se indique
   for (let i = 0; i < numCards; i++) {
-    
     carta = shuffledDeck[0];
     cartas.push(carta);
     shuffledDeck.shift();
-    console.log('carta robada: ' + carta);
-    console.log('deck: ' + shuffledDeck);
-
     games[gameId].cards[userId].push(carta);
-    console.log('cartas usuario: ' + games[gameId].cards[userId]);
-  }
-  let sockets = games[gameId].sockets;
-  let socketUser = sockets.at(userId);
-  console.log('Socket usuario: ' + socketUser);
-  console.log(games[gameId].sockets);
-  //io.to(socketUser).emit('robarCarta', (carta));
-  let cardsNum = games[gameId].cards[userId].length
-  let cartass = games[gameId].cards[userId];
-  for (let i = 0; i < games[gameId].sockets.length; i++) {
-    io.to(games[gameId].sockets[i]).emit('robarCarta', cartass, userId);
   }
 
+  // Informar a los jugadores del robo de carta
+  let cardsNum = games[gameId].cards[userId];
+  io.to(gameId).emit('robarCarta', cardsNum, userId);
 }
 
+// Acumular cartas para robar
 function addCartasRobar(gameId, numeroNuevo){
   let game = games[gameId];
   game.cardsRobar += numeroNuevo;
 }
 
+// Reiniciar cartas para robar
 function resetCartasRobar(gameId){
   let game = games[gameId];
   game.cardsRobar = 0;
 }
 
+// Devuelve el turno del siguiente jugador
 function getNextTurn(gameId){
   let users = games[gameId].users;
   let userId = games[gameId].turn;
   userNext = (users.indexOf(userId) + 1) % users.length; // devuelve un índice
   userNext = users[userNext];
+  
   return userNext;
 }
 
+// Establecer el siguiente turno del juego
 function setNextTurn(gameId){
   let userNext = getNextTurn(gameId);
   games[gameId].turn = userNext;
 }
 
-
-function cambiarTurno(gameId, cardNum){
+// Cambiar el turno del juego teniendo en cuenta saltos de jugadores
+function cambiarTurno(gameId, cardNum, steps){
+  
   let actualTurn = games[gameId].turn;
-  setNextTurn(gameId);
-  console.log('turno cambiado: ' + games[gameId].turn);
+  for (let i = 0; i < steps; i++) {
+    setNextTurn(gameId);    
+  }
 
-  console.log('actualTurn: ' + games[gameId].cards[actualTurn].length);
-
+  // Crear objeto para mandarlo a todos los jugadores de la partida
   let dataUser = {
     'user': actualTurn,
     'cards': games[gameId].cards[actualTurn].length
   }
 
-  console.log('data: ' + JSON.stringify(dataUser));
-
-  for (let i = 0; i < games[gameId].sockets.length; i++) {
-    io.to(games[gameId].sockets[i]).emit('nextTurn', games[gameId].turn,  JSON.stringify(games[gameId].users[i]), cardNum,  JSON.stringify(dataUser));
-  }
+  // Informar a todos los jugadores del siguiente turno, la última carta usada, ...
+  io.to(gameId).emit('nextTurn', games[gameId].turn, cardNum,  JSON.stringify(dataUser));
 }
 
-function cambiarTurnoSalto(gameId, cardNum){
-  let actualTurn = games[gameId].turn;
-  setNextTurn(gameId);
-  setNextTurn(gameId);
-  console.log('turno cambiado: ' + games[gameId].turn);
-
-  console.log('actualTurn: ' + games[gameId].cards[actualTurn].length);
-
-  let dataUser = {
-    'user': actualTurn,
-    'cards': games[gameId].cards[actualTurn].length
-  }
-
-  console.log('data: ' + JSON.stringify(dataUser));
-
-  for (let i = 0; i < games[gameId].sockets.length; i++) {
-    io.to(games[gameId].sockets[i]).emit('nextTurn', games[gameId].turn,  JSON.stringify(games[gameId].users[i]), cardNum,  JSON.stringify(dataUser));
-  }
-}
-
-function saltarTurno(gameId){
-  setNextTurn(gameId);
-  console.log('turno saltado: ' + games[gameId].turn);
-}
-
+// Comprobar si el jugador se ha quedado sin cartas
 function comprobarGanar(gameId, userId){
+
   let cards = games[gameId].cards[userId]
   if(cards.length == 0){
 
-    for (let i = 0; i < games[gameId].sockets.length; i++) {
-      io.to(games[gameId].sockets[i]).emit('partidaTerminada', userId);
-    }
+    io.to(gameId).emit('partidaTerminada', userId);
   }
 }
 
-const PUERTO = 3000
-server.listen(3000, () => {
-  console.log(`Servidor corriendo en el puerto ${PUERTO}`)
-})
-
+// Mandar mensaje a un jugador específico
 function sendMsg(socket, data) {
-  socket.emit("msg", data);
-  /* socket.emit("msg", (data) => {
-    console.log("Mensaje: " + data);
-    socket.emit("chat", data);
-  }) */
+  io.to(socket).emit('msg', data);
 }
+
+// Mandar mensaje a todos los jugadores de la partida
 function sendRoomMsg(gameId, data) {
-  for (let i = 0; i < games[gameId].sockets.length; i++) {
-    io.to(games[gameId].sockets[i]).emit("msgRoom", data);
-  }
+  io.to(gameId).emit('msgRoom', data);
 }
-
-// Unirse a una partida
-function joinGame (socket, gameId, nick) {
-  console.log("gameId: " + gameId);
-  if (!games[gameId]) {
-    console.log(`No se encontró una partida con el código ${gameId}`);
-  } else if (games[gameId].users.indexOf(nick) !== -1) {
-    console.log(`Ya hay un usuario con el nick ${nick}, pruebe con otro`);
-  } else if (games[gameId].users.length >= 4) {
-    console.log(`La partida está llena`);
-  } else {
-    games[gameId].users.push(nick);
-    games[gameId].sockets.push(socket.id);
-    socket.join(gameId);
-    console.log('Usuario añadido con éxito!'); 
-    console.log('Games: ' + util.inspect(games));
-    //console.log(io.adapter.rooms);    
-
-    let users = games[gameId].users;
-    socket.emit('joined', gameId, nick);
-    for (let i = 0; i < games[gameId].sockets.length; i++) {
-      io.to(games[gameId].sockets[i]).emit('userConnected',users, nick, gameId);
-    }
-    //io.in(gameId).emit('userConnected',users, nick, gameId);
-
-  }
-}
-
-// Crear una partida
-function createGame(socket, nick) {
-  console.log(games + " gamesss");
-  console.log(nick);
-
-  let gameId = Math.floor(Math.random() * 9000) + 1000;
-
-  if (!games[gameId]) {
-
-    games[gameId] = {
-      maxUsers: 4,
-      users: [nick],
-      host: nick,
-      sockets: [socket.id],
-      init: false,
-      cardsRobar : 0
-    }
-
-    // Unir al host al grupo
-    socket.join(gameId);
-    //games[gameId].sockets[nick] = socket;
-
-    console.log('Partida creada: ' + util.inspect(games[gameId]) + 'Nick: ' + nick);
-    console.log('Usuarios en la partida: ' + util.inspect(games[gameId].users) + 'Nick: ' + nick);
-
-    // Los parámetros deben ir sin paréntesis al emitir el evento pero capturarlos en el cliente con estos
-    socket.emit('joined', gameId, nick);
-    let users = games[gameId].users;
-    for (let i = 0; i < games[gameId].sockets.length; i++) {
-      io.to(games[gameId].sockets[i]).emit('userConnected',users, nick, gameId);
-    }
-    //io.in(gameId).emit('userConnected',{users: games[gameId].users, nick, gameId});
-    console.log('nick: ' + nick, 'gameId: ' + gameId);
-
-  }
-  else{
-    console.log('No se ha podido crear la partida');
-  }
-  console.log('Games: ' + util.inspect(games));
-  //console.log('Games[gameId]: ' + util.inspect(games[gameId]));
-}
-
-
-/* app.get("/", (req, res) => {
-  console.log("Buenas");
-  res.sendFile(`${__dirname}/client/Index.html`);
-})
- */
-/* app.get('/game/:gameId/:nick', (req, res) => {
-  const gameId = req.query.gameId;
-  const nick = req.query.nick;
-  res.redirect(`${__dirname}/client/game.html?gameId=${gameId}&nick=${nick}`);
-  console.log('AASSDD: ' + games[gameId]);
-  if(games[gameId].users[nick]){
-    res.json(games[gameId]);
-
-  }
-  else {
-    res.status(404).send('Juego no encontrado');
-  }
-}) */
-
-
-/* app.get('/game/:gameId/:nick', (req, res) => {
-  const { gameId } = req.params;
-  const { nick } = req.params;
-  res.redirect(`${__dirname}/client/game.php?gameId=${gameId}&nick=${nick}`);
-  console.log('AASSDD: ' + games[gameId]);
-  if(games[gameId].users[nick]){
-    res.json(games[gameId]);
-
-  }
-  else {
-    res.status(404).send('Juego no encontrado');
-  }
-}) */
 
